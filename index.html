@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="PDFファイルを安全に圧縮。完全クライアントサイド処理。">
+    <title>PDF Compressor (Stable Release v1.8.0)</title>
+
+    <!-- SEO & OGP -->
+    <meta property="og:title" content="PDF Compressor - Private & Fast">
+    <meta property="og:description" content="高度な画像再圧縮によるPDF軽量化。完全クライアントサイド処理でプライバシーを守ります。">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://hiroberry-lab.github.io/pdf-compressor/">
+    <meta name="twitter:card" content="summary">
+
+    <!-- Security: Content Security Policy -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; 
+                   script-src 'self' blob:; 
+                   style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; 
+                   font-src 'self' https://fonts.gstatic.com;
+                   img-src 'self' data: blob:;
+                   worker-src 'self' blob:;
+                   connect-src 'self' blob:;">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body role="main">
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <path d="M12 18v-6" />
+                    <path d="M9 15l3 3 3-3" />
+                </svg>
+            </div>
+            <h1 class="title">PDF Compressor</h1>
+            <p class="subtitle">高度な画像再圧縮による軽量化 (プライバシー重視)</p>
+        </header>
+
+        <div class="card">
+            <section class="features-grid">
+                <div class="feature-item" title="Privacy Guard">
+                    <div class="feature-icon-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        </svg>
+                    </div>
+                    <div class="feature-title">Privacy Guard</div>
+                    <div class="feature-desc">メタデータ完全消去<br>作成者情報もリセット</div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                    </div>
+                    <div class="feature-title">Security</div>
+                    <div class="feature-desc">完全クライアントサイド<br>データ流出なし</div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+                            <polyline points="13 2 13 9 20 9" />
+                        </svg>
+                    </div>
+                    <div class="feature-title">No Setup</div>
+                    <div class="feature-desc">インストール不要<br>ブラウザで即実行</div>
+                </div>
+            </section>
+
+            <div id="howToUseBtn" class="btn-how-to-use-link" role="button" aria-label="使い方ガイドを表示">使い方ガイドを見る</div>
+
+            <!-- Upload Area -->
+            <div id="uploadArea" class="upload-area">
+                <div class="upload-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                </div>
+                <p class="upload-title">PDFファイルをここにドロップ</p>
+                <p class="upload-hint">または <span class="upload-link">ファイルを選択</span></p>
+                <input type="file" id="fileInput" class="hidden" accept="application/pdf">
+            </div>
+
+            <!-- Processing View -->
+            <div id="processingView" class="processing hidden">
+                <p id="processingMsg">ファイルを分析中...</p>
+                <div class="progress-bar-container">
+                    <div id="progressBar" class="progress-bar-fill"></div>
+                </div>
+                <p id="progressText">準備中...</p>
+                <button id="cancelBtn" class="btn btn-outline-danger">処理を中止する</button>
+            </div>
+
+            <!-- Result View -->
+            <div id="resultView" class="result hidden">
+                <div class="stats">
+                    <div class="stat">
+                        <p class="stat-value" id="originalSize">-</p>
+                        <p class="stat-label">元サイズ</p>
+                    </div>
+                    <div class="stat">
+                        <p class="stat-value" id="compressedSize">-</p>
+                        <p class="stat-label">処理後</p>
+                    </div>
+                    <div class="stat">
+                        <p class="stat-value highlight" id="reduction">-</p>
+                        <p class="stat-label">削減率</p>
+                    </div>
+                </div>
+
+                <div class="options-grid">
+                    <div class="option-group">
+                        <label class="option-label">画像品質 (Quality)</label>
+                        <select id="qualitySelect" class="option-select">
+                            <option value="0.9">高画質 (90%)</option>
+                            <option value="0.7" selected>標準 (70%)</option>
+                            <option value="0.4">低画質 (40%)</option>
+                            <option value="0.1">最小 (10%)</option>
+                        </select>
+                    </div>
+                    <div class="option-group">
+                        <label class="option-label">解像度 (DPI)</label>
+                        <select id="dpiSelect" class="option-select">
+                            <option value="3.0">超高 (300dpi相当)</option>
+                            <option value="2.0" selected>標準 (200dpi相当)</option>
+                            <option value="1.5">低 (150dpi相当)</option>
+                            <option value="1.0">最小 (100dpi相当)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="warning-box">
+                    <div class="warning-line">
+                        <span class="warning-icon">⚠️</span>
+                        <p>画像として再構築するため、元のPDF内のテキスト選択や検索はできなくなります。</p>
+                    </div>
+                    <div class="warning-line">
+                        <span class="warning-icon">⚠️</span>
+                        <p>テキストPDFなど元サイズが軽量の場合、画像の再構築によりサイズが増えます。</p>
+                    </div>
+                </div>
+
+                <button id="downloadBtn" class="btn btn-primary">PDFを保存 (ダウンロード)</button>
+                <button id="recompressBtn" class="btn btn-secondary">設定を変えて再圧縮</button>
+                <button id="resetBtn" class="btn btn-secondary">別のファイルを処理</button>
+            </div>
+
+            <div id="errorMsg" class="hidden"></div>
+        </div>
+
+        <footer class="footer">
+            <p>© 2026 HiroBerry | Digital Staff Series Foundation Edition No.1</p>
+            <p class="footer-note">Privacy First & Local Processing Technology</p>
+        </footer>
+    </div>
+
+    <!-- Modal -->
+    <div id="howToUseModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2 class="modal-title">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 16v-4" />
+                    <path d="M12 8h.01" />
+                </svg>
+                使い方ガイド
+            </h2>
+            <div class="modal-step" data-step="1">
+                <p class="modal-step-title">1. ファイルを準備</p>
+                <p class="modal-step-desc">圧縮したいPDFファイルをデスクトップなどに用意します。</p>
+            </div>
+            <div class="modal-step" data-step="2">
+                <p class="modal-step-title">2. ドラッグ＆ドロップ</p>
+                <p class="modal-step-desc">画面中央にPDFを放り込むだけで、自動的に解析とメモリ最適化処理が始まります。</p>
+            </div>
+            <div class="modal-step" data-step="3">
+                <p class="modal-step-title">3. 結果を確認・調整</p>
+                <p class="modal-step-desc">削減率を確認します。画質が気になる場合は「画像品質」を上げて再圧縮してください。</p>
+            </div>
+            <div class="modal-step" data-step="4">
+                <p class="modal-step-title">4. 保存</p>
+                <p class="modal-step-desc">「PDFを保存」ボタンを押して完了です。</p>
+            </div>
+            <button id="closeModalBtn" class="modal-close">閉じる</button>
+        </div>
+    </div>
+
+    <!-- Application Script -->
+    <script src="app.js"></script>
+</body>
+
+</html>
