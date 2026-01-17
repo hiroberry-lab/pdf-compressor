@@ -16,7 +16,7 @@
 
     <!-- Security: Content Security Policy -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; 
-                   script-src 'self' blob:; 
+                   script-src 'self' blob: 'unsafe-inline' 'unsafe-eval'; 
                    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; 
                    font-src 'self' https://fonts.gstatic.com;
                    img-src 'self' data: blob:;
@@ -197,6 +197,10 @@
             <button id="closeModalBtn" class="modal-close">閉じる</button>
         </div>
     </div>
+
+    <!-- Libraries (Restored for local-file/main-thread fallback support) -->
+    <script src="lib/pdf.min.js"></script>
+    <script src="lib/pdf-lib.min.js"></script>
 
     <!-- Application Script -->
     <script src="app.js"></script>
