@@ -6,10 +6,17 @@
 // Polyfill for PDF.js which expects a DOM environment even in workers
 if (typeof document === 'undefined') {
     self.document = {
-        createElement: () => ({
-            getContext: () => ({})
-        })
+        createElement: (tag) => {
+            if (tag === 'canvas') {
+                return new OffscreenCanvas(1, 1);
+            }
+            return { style: {} };
+        },
+        getElementsByTagName: () => [],
+        documentElement: { style: {} },
+        URL: self.location.href
     };
+    self.window = self;
 }
 
 importScripts('lib/pdf.min.js');
@@ -44,7 +51,8 @@ self.onmessage = async (e) => {
 
 async function processPDF(file, options) {
     const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    // Use disableWorker: true to prevent PDF.js from trying to create its own workers inside our worker
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, disableWorker: true }).promise;
 
     const { quality, scale } = options;
     const newPdf = await PDFLib.PDFDocument.create();
