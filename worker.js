@@ -3,6 +3,15 @@
  * Handles PDF rendering and re-compression in a background thread.
  */
 
+// Polyfill for PDF.js which expects a DOM environment even in workers
+if (typeof document === 'undefined') {
+    self.document = {
+        createElement: () => ({
+            getContext: () => ({})
+        })
+    };
+}
+
 importScripts('lib/pdf.min.js');
 importScripts('lib/pdf-lib.min.js');
 
