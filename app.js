@@ -15,57 +15,92 @@ const STRINGS = {
     ERR_GENERIC: '処理中にエラーが発生しました。ファイルの状態を確認してください。',
     WARN_LARGE_SIZE: (size) => `${size}MBを超える大容量ファイルです。お使いの環境によっては時間がかかったり、ブラウザが停止したりする可能性があります。続行しますか？`,
     WARN_LARGE_PAGES: (count) => `ページ数が多いため（${count}ページ）、処理に時間がかかったりブラウザが停止したりする可能性があります。続行しますか？`,
-    STATUS_PROCESSING: (current, total) => `${current} / ${total} ページを処理中`,
-    FALLBACK_NOTICE: 'ブラウザのセキュリティ設定により、処理速度が制限されたモード（メインスレッド）で動作しています。大容量ファイルでは時間がかかる場合があります。'
+    STATUS_PROCESSING: (current, total) => `${current} / ${total} ページを処理中`
 };
 
 /**
- * PDFProcessor: Logic that can run either in main thread or worker
+ * PDFProcessor: Shared logic between Main Thread and potentially Worker
+ * In the current Hybrid Model, this runs on the Main Thread.
  */
 const PDFProcessor = {
     isAborted: false,
 
-    async process(file, options, onProgress) {
+    async process(file, options, onProgress, onDone, onError, worker) {
         this.isAborted = false;
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-        if (pdf.numPages > CONFIG.LIMITS.MAX_PAGE_COUNT) throw new Error('LIMIT_PAGES');
+            if (pdf.numPages > CONFIG.LIMITS.MAX_PAGE_COUNT) throw new Error('LIMIT_PAGES');
 
-        const { quality, scale } = options;
-        const newPdf = await PDFLib.PDFDocument.create();
-        const totalPages = pdf.numPages;
+            const { quality, scale } = options;
+            const totalPages = pdf.numPages;
 
-        for (let i = 1; i <= totalPages; i++) {
-            if (this.isAborted) throw new Error('ABORTED_BY_USER');
-            onProgress(i, totalPages);
+            // Initialize worker for PDF construction
+            if (worker) {
+                worker.postMessage({ type: 'init' });
+            } else {
+                // Fallback for when NO worker is available even for construction
+                this.newPdf = await PDFLib.PDFDocument.create();
+            }
 
-            const page = await pdf.getPage(i);
-            const viewport = page.getViewport({ scale });
+            for (let i = 1; i <= totalPages; i++) {
+                if (this.isAborted) throw new Error('ABORTED_BY_USER');
+                onProgress(i, totalPages);
 
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
+                const page = await pdf.getPage(i);
+                const viewport = page.getViewport({ scale });
 
-            await page.render({ canvasContext: ctx, viewport }).promise;
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
 
-            const imgDataUrl = canvas.toDataURL('image/jpeg', quality);
-            const imgBytes = this.base64ToUint8Array(imgDataUrl.split(',')[1]);
-            const img = await newPdf.embedJpg(imgBytes);
+                await page.render({ canvasContext: ctx, viewport }).promise;
 
-            const newPage = newPdf.addPage([viewport.width / scale, viewport.height / scale]);
-            newPage.drawImage(img, {
-                x: 0, y: 0,
-                width: newPage.getWidth(),
-                height: newPage.getHeight()
-            });
-            
-            canvas.width = 0; canvas.height = 0; // Cleanup
+                const imgDataUrl = canvas.toDataURL('image/jpeg', quality);
+                const imgBytes = this.base64ToUint8Array(imgDataUrl.split(',')[1]);
+
+                if (worker) {
+                    worker.postMessage({
+                        type: 'addPage',
+                        data: { imgBytes, width: viewport.width, height: viewport.height, scale },
+                        options: { quality }
+                    });
+                    // Wait for worker to signal page addition before continuing to save memory
+                    await new Promise((resolve, reject) => {
+                        const timeout = setTimeout(() => reject(new Error('Worker timeout')), 30000);
+                        const originalHandler = worker.onmessage;
+                        worker.onmessage = (e) => {
+                            if (e.data.type === 'pageAdded') {
+                                clearTimeout(timeout);
+                                worker.onmessage = originalHandler;
+                                resolve();
+                            } else {
+                                originalHandler(e);
+                            }
+                        };
+                    });
+                } else {
+                    const img = await this.newPdf.embedJpg(imgBytes);
+                    const newPage = this.newPdf.addPage([viewport.width / scale, viewport.height / scale]);
+                    newPage.drawImage(img, { x: 0, y: 0, width: newPage.getWidth(), height: newPage.getHeight() });
+                }
+
+                canvas.width = 0; canvas.height = 0; // Cleanup
+            }
+
+            if (worker) {
+                worker.postMessage({ type: 'finish' });
+                // Result will be handled by UIManager.worker.onmessage
+            } else {
+                const pdfBytes = await this.newPdf.save();
+                onDone(new Blob([pdfBytes], { type: 'application/pdf' }));
+            }
+
+        } catch (err) {
+            onError(err);
         }
-
-        const pdfBytes = await newPdf.save();
-        return new Blob([pdfBytes], { type: 'application/pdf' });
     },
 
     base64ToUint8Array(base64) {
@@ -81,8 +116,7 @@ const UIManager = {
         currentFile: null,
         originalSize: 0,
         compressedBlob: null,
-        isLargeFileConfirmed: false,
-        useFallback: false
+        isLargeFileConfirmed: false
     },
 
     worker: null,
@@ -103,7 +137,6 @@ const UIManager = {
     init() {
         this.setupEventListeners();
         this.initWorker();
-        // Initialize PDF.js Global Props (for fallback)
         if (window.pdfjsLib) {
             pdfjsLib.GlobalWorkerOptions.workerSrc = CONFIG.WORKER_SRC;
         }
@@ -111,25 +144,24 @@ const UIManager = {
 
     initWorker() {
         try {
-            // Check if we are on file:// protocol, most browsers block workers here
-            if (window.location.protocol === 'file:') {
-                throw new Error('FILE_PROTOCOL_RESTRICTION');
-            }
-            
             this.worker = new Worker('worker.js');
             this.worker.onmessage = (e) => {
-                const { type, current, total, blob, message } = e.data;
+                const { type, blob, message } = e.data;
                 switch (type) {
-                    case 'progress': this.updateProgress(current, total); break;
-                    case 'done': this.state.compressedBlob = blob; this.showResult(); break;
-                    case 'aborted': this.reset(); break;
-                    case 'error': this.handleError(new Error(message)); break;
+                    case 'done':
+                        this.state.compressedBlob = blob;
+                        this.showResult();
+                        break;
+                    case 'error':
+                        this.handleError(new Error(message));
+                        break;
+                    case 'aborted':
+                        this.reset();
+                        break;
                 }
             };
-            this.state.useFallback = false;
         } catch (e) {
-            console.warn('Web Worker initialization failed. Falling back to main thread processing.', e);
-            this.state.useFallback = true;
+            console.warn('Worker initialization failed. Using main thread only.', e);
             this.worker = null;
         }
     },
@@ -153,8 +185,8 @@ const UIManager = {
         document.getElementById('recompressBtn').onclick = () => this.startProcessing(true);
         document.getElementById('resetBtn').onclick = () => this.reset();
         document.getElementById('cancelBtn').onclick = () => {
-            if (this.state.useFallback) PDFProcessor.isAborted = true;
-            else if (this.worker) this.worker.postMessage({ type: 'abort' });
+            PDFProcessor.isAborted = true;
+            if (this.worker) this.worker.postMessage({ type: 'abort' });
         };
     },
 
@@ -191,21 +223,14 @@ const UIManager = {
             isConfirmed: this.state.isLargeFileConfirmed || isManualRecompress
         };
 
-        if (this.state.useFallback) {
-            console.log('Using main-thread fallback processing...');
-            try {
-                this.state.compressedBlob = await PDFProcessor.process(
-                    this.state.currentFile, 
-                    options, 
-                    (curr, tot) => this.updateProgress(curr, tot)
-                );
-                this.showResult();
-            } catch (err) {
-                this.handleError(err);
-            }
-        } else if (this.worker) {
-            this.worker.postMessage({ type: 'start', file: this.state.currentFile, options });
-        }
+        await PDFProcessor.process(
+            this.state.currentFile,
+            options,
+            (curr, tot) => this.updateProgress(curr, tot),
+            (blob) => { this.state.compressedBlob = blob; this.showResult(); },
+            (err) => this.handleError(err),
+            this.worker
+        );
     },
 
     updateProgress(current, total) {
@@ -237,7 +262,7 @@ const UIManager = {
     },
 
     reset() {
-        this.state = { ...this.state, currentFile: null, originalSize: 0, compressedBlob: null, isLargeFileConfirmed: false };
+        this.state = { currentFile: null, originalSize: 0, compressedBlob: null, isLargeFileConfirmed: false };
         PDFProcessor.isAborted = false;
         this.el.fileInput.value = '';
         this.el.progressBar.style.width = '0%';
@@ -252,7 +277,7 @@ const UIManager = {
     },
 
     handleError(err) {
-        if (err.message === 'ABORTED_BY_USER') {
+        if (err.message === 'ABORTED_BY_USER' || err.data?.type === 'aborted') {
             this.reset();
         } else if (err.message === 'LIMIT_PAGES') {
             this.showError(STRINGS.ERR_HARD_LIMIT_PAGES(CONFIG.LIMITS.MAX_PAGE_COUNT));
