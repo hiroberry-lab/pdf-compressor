@@ -1,5 +1,3 @@
-LICENSE\_JA.md 修正版（推奨）
-
 MIT ライセンス (日本語訳)
 
 Copyright (c) 2026 hiroberry-lab
